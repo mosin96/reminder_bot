@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS chats (
 
 CREATE TABLE IF NOT EXISTS reminders (
     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_seq             INTEGER NOT NULL DEFAULT 0,
     chat_id              INTEGER NOT NULL,
     author_id            INTEGER NOT NULL,
     text                 TEXT NOT NULL,
@@ -75,7 +76,34 @@ class Database:
         await self._conn.execute("PRAGMA journal_mode=WAL")
         await self._conn.execute("PRAGMA foreign_keys=ON")
         await self._conn.executescript(SCHEMA)
+        await self._migrate()
         await self._conn.commit()
+
+    async def _migrate(self) -> None:
+        """Добавляет недостающие колонки в старые базы и чинит нумерацию по чатам."""
+        columns = {
+            row["name"] for row in await self._fetchall("PRAGMA table_info(reminders)")
+        }
+        if "chat_seq" not in columns:
+            await self.conn.execute(
+                "ALTER TABLE reminders ADD COLUMN chat_seq INTEGER NOT NULL DEFAULT 0"
+            )
+            counters: dict[int, int] = {}
+            rows = await self._fetchall(
+                "SELECT id, chat_id FROM reminders ORDER BY chat_id, id"
+            )
+            for row in rows:
+                chat_id = row["chat_id"]
+                counters[chat_id] = counters.get(chat_id, 0) + 1
+                await self.conn.execute(
+                    "UPDATE reminders SET chat_seq = ? WHERE id = ?",
+                    (counters[chat_id], row["id"]),
+                )
+        await self.conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_reminders_chat_seq "
+            "ON reminders(chat_id, chat_seq)"
+        )
+        await self.conn.commit()
 
     async def close(self) -> None:
         if self._conn is not None:
@@ -130,16 +158,25 @@ class Database:
         confirm_required: bool = False,
         confirm_interval_min: int = 10,
         max_attempts: int = 3,
-    ) -> int:
+    ) -> tuple[int, int]:
+        """Создаёт напоминание и возвращает (глобальный id, номер в чате)."""
         weekdays_json = json.dumps(list(weekdays), ensure_ascii=False) if weekdays else None
+        seq_row = await self._fetchone(
+            "SELECT COALESCE(MAX(chat_seq), 0) + 1 AS next_seq "
+            "FROM reminders WHERE chat_id = ?",
+            (chat_id,),
+        )
+        chat_seq = int(seq_row["next_seq"]) if seq_row is not None else 1
         cursor = await self.conn.execute(
             """
             INSERT INTO reminders(
-                chat_id, author_id, text, recurrence, weekdays, day_of_month, time_of_day,
-                next_run_at, confirm_required, confirm_interval_min, max_attempts, status, created_at
-            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+                chat_seq, chat_id, author_id, text, recurrence, weekdays, day_of_month,
+                time_of_day, next_run_at, confirm_required, confirm_interval_min,
+                max_attempts, status, created_at
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
             """,
             (
+                chat_seq,
                 chat_id,
                 author_id,
                 text,
@@ -155,10 +192,16 @@ class Database:
             ),
         )
         await self.conn.commit()
-        return int(cursor.lastrowid)
+        return int(cursor.lastrowid), chat_seq
 
     async def get_reminder(self, reminder_id: int) -> aiosqlite.Row | None:
         return await self._fetchone("SELECT * FROM reminders WHERE id = ?", (reminder_id,))
+
+    async def get_reminder_by_seq(self, chat_id: int, chat_seq: int) -> aiosqlite.Row | None:
+        return await self._fetchone(
+            "SELECT * FROM reminders WHERE chat_id = ? AND chat_seq = ?",
+            (chat_id, chat_seq),
+        )
 
     async def list_active_reminders(self, chat_id: int) -> list[aiosqlite.Row]:
         return await self._fetchall(
@@ -233,6 +276,7 @@ class Database:
             """
             SELECT
                 o.*,
+                r.chat_seq             AS chat_seq,
                 r.text                 AS reminder_text,
                 r.recurrence           AS recurrence,
                 r.weekdays             AS weekdays,

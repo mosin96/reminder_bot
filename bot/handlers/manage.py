@@ -36,7 +36,7 @@ async def _render_list(db: Database, chat_id: int, tz: ZoneInfo):
 
     lines = ["🗒 <b>Активные напоминания этого чата</b>", ""]
     for reminder in reminders:
-        lines.append(f"<b>#{reminder['id']}</b> — {describe_schedule(reminder, tz)}")
+        lines.append(f"<b>#{reminder['chat_seq']}</b> — {describe_schedule(reminder, tz)}")
         lines.append(f"   {escape_html(reminder['text'])}")
         details: list[str] = []
         if reminder["confirm_required"]:
@@ -81,8 +81,8 @@ async def cancel_command(
         await message.answer("Номер должен быть числом. Например: <code>/cancel 12</code>")
         return
 
-    reminder = await db.get_reminder(int(raw))
-    if reminder is None or reminder["chat_id"] != message.chat.id:
+    reminder = await db.get_reminder_by_seq(message.chat.id, int(raw))
+    if reminder is None:
         await message.answer("Напоминание с таким номером не найдено в этом чате.")
         return
     if reminder["status"] != "active":
@@ -93,7 +93,7 @@ async def cancel_command(
         return
 
     await db.cancel_reminder(reminder["id"])
-    await message.answer(f"❌ Напоминание #{reminder['id']} отменено.")
+    await message.answer(f"❌ Напоминание #{reminder['chat_seq']} отменено.")
 
 
 @router.callback_query(F.data.startswith("cancel:"))
@@ -122,7 +122,7 @@ async def cancel_button(
         await callback.message.edit_text(text, reply_markup=keyboard)
     except TelegramAPIError:
         pass
-    await callback.answer(f"Напоминание #{reminder['id']} отменено")
+    await callback.answer(f"Напоминание #{reminder['chat_seq']} отменено")
 
 
 @router.message(Command("timezone"))

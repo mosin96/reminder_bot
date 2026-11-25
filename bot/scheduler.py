@@ -24,11 +24,12 @@ def build_reminder_text(
     attempt: int | None = None,
     max_attempts: int | None = None,
 ) -> str:
-    reminder_id = reminder["id"]
+    reminder = dict(reminder)
+    number = reminder.get("chat_seq") or reminder["id"]
     if attempt is not None and attempt > 1:
-        header = f"🔁 <b>Повтор {attempt}/{max_attempts}</b> — напоминание #{reminder_id}"
+        header = f"🔁 <b>Повтор {attempt}/{max_attempts}</b> — напоминание #{number}"
     else:
-        header = f"⏰ <b>Напоминание #{reminder_id}</b>"
+        header = f"⏰ <b>Напоминание #{number}</b>"
 
     lines = [header, "", escape_html(str(reminder["text"]))]
 
@@ -86,6 +87,7 @@ async def _retry_occurrence(bot: Bot, db: Database, occurrence, now: datetime) -
 
     reminder = {
         "id": occurrence["reminder_id"],
+        "chat_seq": occurrence["chat_seq"],
         "text": occurrence["reminder_text"],
         "recurrence": occurrence["recurrence"],
         "weekdays": occurrence["weekdays"],
@@ -116,8 +118,9 @@ async def _retry_occurrence(bot: Bot, db: Database, occurrence, now: datetime) -
 
     if attempt > max_attempts:
         await db.mark_occurrence_missed(occurrence_id)
+        number = occurrence["chat_seq"] or occurrence["reminder_id"]
         note = (
-            f"⌛ Напоминание #{occurrence['reminder_id']} не подтверждено "
+            f"⌛ Напоминание #{number} не подтверждено "
             f"за {max_attempts} {attempts_word(max_attempts)} и пропущено.\n\n"
             f"<i>{escape_html(str(occurrence['reminder_text']))}</i>"
         )

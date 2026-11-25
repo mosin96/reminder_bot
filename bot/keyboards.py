@@ -103,7 +103,15 @@ def preview_kb() -> InlineKeyboardMarkup:
 
 
 def list_kb(reminders: Iterable) -> InlineKeyboardMarkup:
-    rows = [[_button(f"❌ Отменить #{reminder['id']}", f"cancel:{reminder['id']}")] for reminder in reminders]
+    rows = [
+        [
+            _button(
+                f"❌ Отменить #{reminder['chat_seq']}",
+                f"cancel:{reminder['id']}",
+            )
+        ]
+        for reminder in reminders
+    ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

@@ -367,7 +367,7 @@ async def save_reminder(
         else:
             raise ValueError(f"Неизвестный тип повторяемости: {recurrence}")
 
-        reminder_id = await db.create_reminder(
+        _reminder_id, chat_seq = await db.create_reminder(
             chat_id=callback.message.chat.id,
             author_id=callback.from_user.id,
             text=data["text"],
@@ -388,7 +388,7 @@ async def save_reminder(
     await state.clear()
     stub = {**data, "next_run_at": next_run_at.isoformat(timespec="seconds")}
     await callback.message.edit_text(
-        f"✅ <b>Напоминание #{reminder_id} создано</b>\n\n"
+        f"✅ <b>Напоминание #{chat_seq} создано</b>\n\n"
         f"🕒 {_schedule_description(stub, tz)}\n\n"
         "Посмотреть все напоминания чата: /list"
     )
